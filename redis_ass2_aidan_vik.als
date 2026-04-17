@@ -104,8 +104,25 @@ pred Init {
 }
 
 // Task 1c: Complete the action_user_send_http_request predicate.
-pred action_user_send_http_request {
+//Update the predicate to contain two arguments, one specifying the user, and
+//One specifing the data to be send
+pred action_user_send_http_request[u: User, d: UserData] {
   // FILL IN HERE
+	//HTTP network is currently empty
+	no State.http_network
+	//User must own the data they are sending
+	d in u.my_data
+	//Need to create a new HTTPRequest and assign it to the next http_network
+	one req: HTTPRequest | {
+		req.contents = d
+		req.src = u
+		State.http_network' = req
+	//Update Last action	
+	State.last_action = UserSendReq
+	//Everything else remaind unchanged
+	State.connection_for' = State.connection_for
+	State.connection_send_data' = State.connection_send_data
+	State.connection_recv_data' = State.connection_recv_data
 }
 
 // Task 1d: Complete the action_user_recv_http_response predicate.
