@@ -117,8 +117,9 @@ pred action_user_send_http_request[u: User, d: UserData] {
 		req.contents = d
 		req.src = u
 		State.http_network' = req
+	}
 	//Update Last action	
-	State.last_action = UserSendReq
+	State.last_action' = UserSendReq
 	//Everything else remaind unchanged
 	State.connection_for' = State.connection_for
 	State.connection_send_data' = State.connection_send_data
@@ -128,11 +129,39 @@ pred action_user_send_http_request[u: User, d: UserData] {
 // Task 1d: Complete the action_user_recv_http_response predicate.
 pred action_user_recv_http_response {
   // FILL IN HERE
+	//Ensure there is a HTTPResponse in the http_network that is being sent to some user
+	some u: User | {
+		State.http_network in HTTPResponse
+		State.http_network.dest = u
+	//Once completed, the message is removed
+	no State.http_network'
+	//Last action updated
+	State.last_action' = UserRecvResp
+	//Ensure other states remain unchanged
+	State.connection_for' = State.connection_for
+	State.connection_send_data' = State.connection_send_data
+	State.connection_recv_data' = State.connection_recv_data
 }
 
 // Task 1e: Complete the action_recv_http_request_and_acquire_connection predicate.
 pred action_recv_http_request_and_acquire_connection {
   // FILL IN HERE
+	//Identify that there is a message in the network that is a request
+	State.http_network in HTTPRequest
+	//find a connection that isnt mapped to any user in State.connection_for
+	some c: Connection | {
+		no State.connection_for[c]
+		//Ensure network is cleared for next state
+		no State.http_network'
+		//Allocate the connection and write the data
+		State.connection_for' = State.connection_for ++ (c -> State.http_network.src)
+		State.connection_send_data' = State.connection_send_data ++ (c -> State.http_network.contents)
+		//Update Last Action
+		State.last_action' = RecvReqAcquireConn
+		//Ensure other states remain unchanged
+		State.connection_recv_data' = State.connection_recv_data
+	}
+
 }
 
 // Task 1f: Complete user_data_for_same_user and action_redis_process_connection.
@@ -175,7 +204,7 @@ fact trans {
               action_redis_process_connection or
               action_recv_http_request_and_acquire_connection or
               action_user_recv_http_response or
-              action_user_send_http_request)
+              action_user_send_http_request[User, UserData])
 }
 
 // =============================================================================
