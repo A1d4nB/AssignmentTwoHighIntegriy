@@ -112,7 +112,7 @@ pred action_user_send_http_request {
 
 		//find httpreq
 
-		some req: HttpRequest | req.src in u & eq.contents = d {
+		some req: HTTPRequest | req.src in u & req.contents = d {
 			State.http_network' = req
 		}
 		
@@ -130,19 +130,19 @@ pred action_user_send_http_request {
 pred action_user_recv_http_response  {
 // A User receives an HTTPResponse that is currently on the http network and is destined for that User. The message is removed from the network.
 
-	 some req: State.http_network, u: User | {
+	 some msg: State.http_network, u: User | {
 
 	// precondition 
 	//http_network has a HTTP Response,
-	req in HTTPResponse
+	msg in HTTPResponse
 
 	// destined for that User
-	req.dest = u
+	msg.dest = u
 
 
 	// post condition 
 	// send data to user, as not explicitly stated - might REMOVE
-	u.my_data = u.my_data + req.contents
+	u.my_data' = u.my_data + msg.contents
 
 	// remove response
 	State.http_network' = none
@@ -154,6 +154,7 @@ pred action_user_recv_http_response  {
 
 	//update action
 	State.last_action' = UserRecvResp
+	}
 
 }
 
@@ -180,7 +181,7 @@ pred action_recv_http_request_and_acquire_connection {
 		// post condition
 		State.connection_for' = State.connection_for + (conn -> req.src)
 
-		// writes the request’s contents to the Connection’s connection send data buffer.
+		// writes the request’s contents to the Connection’s connection send data buffer. -- potentish BUG?
 		State.connection_send_data' = State.connection_send_data + (conn -> req.contents)
 
 	}
@@ -202,7 +203,7 @@ pred user_data_for_same_user[d, d2 : UserData] {
 
 	// basically, check that the connection number matches the user, for both send and receive data, 
 	// dont know if its true that d2 is not in user.mydata, but d is definitely in it. 
-	
+	some u: User | (d + d2) in u.my_data
 }
 
 pred action_redis_process_connection {
@@ -215,44 +216,94 @@ pred action_redis_process_connection {
 
 	// Pre condition
 	// data in connections send data buffer
-	one
-
-
-	// post condition
-
-	// remove that send data buffer
-
-	// some other data - d2 - same channel recv data buffer.  -> belonging to same user. --> is this the new function?
-
-
-	// unchanged
-	State.http_network' = State.http_network
- 	State.connection_for' = State.connection_for
-
-
-	State.connection_recv_data' = none
-	State.connection_send_data' = State.connection_send_data
-	State.last_action' = RedisProcess
+	some c : Connection | {
+		//Check that the receive buffer for that same connection is currently empty
+		no State.connection_recv_data[c]
+		//Defining some data sitting in the connection's send buffer
+		let d1 = State.connection_send_data[c] | {
+			//Check there is actually some data in that send buffer
+			some d1
+			//Grab some more data
+			some d2 :  UserData | {
+				//Use new helper predicate above
+				user_data_for_same_user[d1, d2]
+				//Update the buffers
+				State.connection_send_data' = State.connection_send_data - (c -> d1)
+				State.connection_recv_data' = State.connection_recv_data ++ (c ->d2)
+				//Framing and updating last_action
+				State.last_action' = RedisProcess
+				State.connection_for' = State.connection_for
+				State.http_network' = State.http_network
+			}
+		}
+	}
 }
 
 // Task 1g: Complete the action_release_connection_and_send_http_response predicate.
 pred action_release_connection_and_send_http_response {
-  // Connection is released and HTTPResponse sent occurs when there is data in a Connection’s “recv data” buffer.
-// The web frontend reads that data, creates an HTTPResponse
-//with the data as its contents, destined for the User to whom the Connection is currently allocated, places the HTTPResponse on the 
-// http network (which must be empty), deallocates the Connection (removing the corresponding entry from the “connection for” table),
-// and clears the Connection’s “recv data” buffer.
 
+	some conn: Connection | {
+		// receive data has some
+		one State.connection_recv_data[conn]
 
+		some u: User | {
+			// fiund the correct users
+			(conn -> u) in State.connection_for
+
+			// makes the response
+			some resp: HTTPResponse | {
+				resp.dest = u
+				resp.contents = State.connection_recv_data[conn]
+
+				//check that the network is empty
+				no State.http_network				
+
+				//Place this HTTPResponse into the network
+				State.http_network' = resp
+			}
+
+		//Clear the receive buffer
+		State.connection_recv_data' = State.connection_recv_data - (conn -> State.connection_recv_data[conn])
+		//Also clear the connection
+		State.connection_for' = State.connection_for - (conn -> u)
+		//Update last_action
+		State.last_action' = ReleaseConnSendResp
+
+		//Framing - unchanged
+		State.connection_send_data' = State.connection_send_data	
+	}
+}
 }
 
 // Task 1h: Complete the action_user_request_cancelled predicate.
 pred action_user_request_cancelled {
-  //User request is Cancelled can occur when a Connection is currently allocated to some User.
-//The web frontend deallocates the Connection (removing the corresponding entry from
-//the “connection for” table) and sends an HTTPResponse to that User containing the
-//DataRequestCancelled sentinel value. This action can only occur when the http network
-//is empty.
+
+	some conn: Connection, u: User | {
+		(conn -> u) in State.connection_for
+
+		State.connection_for' = State.connection_for - (conn -> u)
+
+		some resp: HTTPResponse | {
+			resp.dest = u
+			resp.contents = DataRequestCancelled
+
+			//check that the network is empty
+			no State.http_network				
+
+			//Place this HTTPResponse into the network
+			State.http_network' = resp
+		}
+
+		// unchanged. 
+		State.connection_recv_data' = State.connection_recv_data
+		State.connection_send_data' = State.connection_send_data
+		State.last_action' = UserReqCancelled
+
+		// this action doesd not check or remove the buffers,
+		// basically only clears the connection table, but doesnt fliush the buffer
+		// so when another user acquires that connection, then the same connection has some revc data, 
+		// which then goes to another user, soon after its validated. 
+	}
 }
 
 // Given: do_nothing predicate (do not modify)
