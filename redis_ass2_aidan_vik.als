@@ -42,19 +42,13 @@ sig User {
 
 //Take two users from set of all users, ensuring they are disjoint, and check if 
 //their sets of personal data intersect
-pred user_data_disjoin{
-	all disj u1, u2 : User | no (u1.my_data & u2.my_data)
+fact user_data_disjoin{
+	always all disj u1, u2 : User | no (u1.my_data & u2.my_data)
 }
 
 //Runs the predicate above with a scope of 3 using exactly 2 users
 //Returning predcate is consistent when ran
-run user_data_disjoin for 3 but exactly 2 User
-
-//Moved the predicate above that has now been tested into a fact named disjoint
-fact disjoint {
-	user_data_disjoin
-}
-
+//run user_data_disjoin for 3 but exactly 2 User
 
 // HTTP messages carry Data as their contents.
 // An HTTPRequest is sent by a user (src) to the server.
@@ -99,24 +93,27 @@ pred Init {
   // FILL IN HERE
 	//Just ensures that all sets are empty, and the last_action is set to DoNothing
 	no State.http_network 
-       no State.connection_send_data + State.connection_recv_data + State.connection_for
+       no State.connection_send_data 
+	no State.connection_recv_data
+	no State.connection_for
 	State.last_action = DoNothing
 }
 
 // Task 1c: Complete the action_user_send_http_request predicate.
-//Update the predicate to contain two arguments, one specifying the user, and
-//One specifing the data to be send
-pred action_user_send_http_request[u: User, d: UserData] {
+
+pred action_user_send_http_request {
   // FILL IN HERE
-	//HTTP network is currently empty
-	no State.http_network
-	//User must own the data they are sending
-	d in u.my_data
-	//Need to create a new HTTPRequest and assign it to the next http_network
-	one req: HTTPRequest | {
-		req.contents = d
-		req.src = u
-		State.http_network' = req
+	some u: User, d: UserData | {
+		//HTTP network is currently empty
+		no State.http_network
+		//User must own the data they are sending
+		d in u.my_data
+		//Need to create a new HTTPRequest and assign it to the next http_network
+		one req: HTTPRequest | {
+			req.contents = d
+			req.src = u
+			State.http_network' = req
+		}
 	}
 	//Update Last action	
 	State.last_action' = UserSendReq
@@ -130,9 +127,11 @@ pred action_user_send_http_request[u: User, d: UserData] {
 pred action_user_recv_http_response {
   // FILL IN HERE
 	//Ensure there is a HTTPResponse in the http_network that is being sent to some user
-	some u: User | {
-		State.http_network in HTTPResponse
-		State.http_network.dest = u
+	some msg: State.http_network, u: User | {
+		msg in HTTPResponse
+		msg.dest = u
+		//Send data to user, as not explicity stated
+		u.my_data' = u.my_data +msg.contents
 	}
 	//Once completed, the message is removed
 	no State.http_network'
@@ -148,15 +147,18 @@ pred action_user_recv_http_response {
 pred action_recv_http_request_and_acquire_connection {
   // FILL IN HERE
 	//Identify that there is a message in the network that is a request
-	State.http_network in HTTPRequest
+
 	//find a connection that isnt mapped to any user in State.connection_for
-	some c: Connection | {
+	some req: State.http_network, c: Connection | {
+		//There is a request in HTTPRequest
+		req in HTTPRequest
+		
 		no State.connection_for[c]
 		//Ensure network is cleared for next state
 		no State.http_network'
 		//Allocate the connection and write the data
-		State.connection_for' = State.connection_for ++ (c -> State.http_network.src)
-		State.connection_send_data' = State.connection_send_data ++ (c -> State.http_network.contents)
+		State.connection_for' = State.connection_for + (c -> req.src)
+		State.connection_send_data' = State.connection_send_data + (c -> req.contents)
 		//Update Last Action
 		State.last_action' = RecvReqAcquireConn
 		//Ensure other states remain unchanged
@@ -179,77 +181,83 @@ pred action_redis_process_connection {
 		//Check that the receive buffer for that same connection is currently empty
 		no State.connection_recv_data[c]
 		//Defining some data sitting in the connection's send buffer
-		let d1 = State.connection_send_data[c] | {
+		some d1: State.connection_send_data[c], d2: UserData | {
 			//Check there is actually some data in that send buffer
-			some d1
-			//Grab some more data
-			some d2 :  UserData | {
-				//Use new helper predicate above
-				user_data_for_same_user[d1, d2]
-				//Update the buffers
-				State.connection_send_data' = State.connection_send_data - (c -> d1)
-				State.connection_recv_data' = State.connection_recv_data ++ (c ->d2)
-				//Framing and updating last_action
-				State.last_action' = RedisProcess
-				State.connection_for' = State.connection_for
-				State.http_network' = State.http_network
-			}
+			//Removed for now, could be overcontraining
+			//some d1
+			//Use new helper predicate above
+			user_data_for_same_user[d1, d2]
+			//Update the buffers
+			State.connection_send_data' = State.connection_send_data - (c -> d1)
+			State.connection_recv_data' = State.connection_recv_data + (c ->d2)
+			//Framing and updating last_action
+			State.last_action' = RedisProcess
+			State.connection_for' = State.connection_for
+			State.http_network' = State.http_network
 		}
 	}
 }
 
 // Task 1g: Complete the action_release_connection_and_send_http_response predicate.
 pred action_release_connection_and_send_http_response {
-  // FILL IN HERE
-	//find a connection that is mapped to a user currently present in the table
-	some c: Connection, u: User | {
-		(c -> u) in State.connection_for
-		//Find the data in the connections buffer
-		let d = State.connection_recv_data[c] | {
-			some d
-			//Check that http_network is currently empty
-			no State.http_network
-			//Create a new HTTPResponse
-			one resp: HTTPResponse | {
-				resp.dest = u
-				resp.contents = d
-				//Place this HTTPResponse into the network
-				State.http_network' = resp
-			}
-			//Clear the receive buffer
-			State.connection_recv_data' = State.connection_recv_data - (c -> d)
-			//Also clear the connection
-			State.connection_for' = State.connection_for - (c ->u)
-			//Update last_action
-			State.last_action' = ReleaseConnSendResp
-			//Framing
-			State.connection_send_data' = State.connection_send_data
+	some conn: Connection | {
+        // receive data has some
+        one State.connection_recv_data[conn]
+        some u: User | {
+            // find the correct users
+            (conn -> u) in State.connection_for
+            // makes the response
+            some resp: HTTPResponse | {
+                resp.dest = u
+                resp.contents = State.connection_recv_data[conn]
+                //check that the network is empty
+                no State.http_network
+                //Place this HTTPResponse into the network
+                State.http_network' = resp
+            }
+	        //Clear the receive buffer
+	        State.connection_recv_data' = State.connection_recv_data - (conn -> State.connection_recv_data[conn])
+	        //Also clear the connection
+	        State.connection_for' = State.connection_for - (conn -> u)
+	        //Update last_action
+	        State.last_action' = ReleaseConnSendResp
+	
+	        //Framing - unchanged
+	        State.connection_send_data' = State.connection_send_data
 		}
 	}
 }
 
+
 // Task 1h: Complete the action_user_request_cancelled predicate.
 pred action_user_request_cancelled {
-  // FILL IN HERE
-	//Find some connection that is currently mapped to a User
-	some c: Connection, u: User | {
-		(c -> u) in State.connection_for
-		//Network must be empty
-		no State.http_network
-		//Release the connection
-		State.connection_for' = State.connection_for - (c -> u)
-		//Clear the buffers too
-		State.connection_recv_data' = State.connection_recv_data - (c -> State.connection_recv_data[c])
-		State.connection_send_data' = State.connection_send_data - (c -> State.connection_send_data[c])
-		//Define a new HTTPResponse
-		one resp : HTTPResponse | {
-			resp.dest = u
-			resp.contents = DataRequestCancelled
-			State.http_network' = resp
-		}
-		//Update last_action
-		State.last_action' = UserReqCancelled
-	}
+
+    some conn: Connection, u: User | {
+        (conn -> u) in State.connection_for
+
+        State.connection_for' = State.connection_for - (conn -> u)
+
+        some resp: HTTPResponse | {
+            resp.dest = u
+            resp.contents = DataRequestCancelled
+
+            //check that the network is empty
+            no State.http_network
+
+            //Place this HTTPResponse into the network
+            State.http_network' = resp
+        }
+
+        // unchanged. 
+        State.connection_recv_data' = State.connection_recv_data
+        State.connection_send_data' = State.connection_send_data
+        State.last_action' = RequestCancelled
+
+        // this action does not check or remove the buffers,
+        // basically only clears the connection table, but doesnt fliush the buffer
+        // so when another user acquires that connection, then the same connection has some revc data, 
+        // which then goes to another user, soon after its validated. 
+    }
 }
 
 // Given: do_nothing predicate (do not modify)
@@ -273,7 +281,7 @@ fact trans {
               action_redis_process_connection or
               action_recv_http_request_and_acquire_connection or
               action_user_recv_http_response or
-              action_user_send_http_request[User, UserData])
+              action_user_send_http_request)
 }
 
 // =============================================================================
