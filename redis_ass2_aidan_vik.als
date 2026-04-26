@@ -322,8 +322,19 @@ run vulnerability for 2
 
 // FILL IN HERE
 // i think this is when a connection is cleared, all the buffers in the thing should be cleared. 
+pred inv {
 
+always (all conn: Connection |
+		all user: State.connection_for[conn] | 
+			// the recv or send buffer data in users mydata. 
+			 (State.connection_send_data[conn] + State.connection_recv_data[conn]) in user.my_data
+		)
+}
 
+pred invUnalloc {
+	
+	always (all conn: Connection | no (State.connection_for[conn]) implies no (State.connection_send_data[conn] +  State.connection_recv_data[conn]))
+}
 
 // check statement
 
