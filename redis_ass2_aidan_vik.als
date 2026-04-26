@@ -130,8 +130,8 @@ pred action_user_recv_http_response {
 	some msg: State.http_network, u: User | {
 		msg in HTTPResponse
 		msg.dest = u
-		//Send data to user, as not explicity stated
-		u.my_data' = u.my_data +msg.contents
+		//Send data to user, as not explicity stated - might REMOVE
+		//u.my_data' = u.my_data +msg.contents
 	}
 	//Once completed, the message is removed
 	no State.http_network'
@@ -292,12 +292,27 @@ fact trans {
 
 // FILL IN HERE
 
+assert NoDataLeak {
+
+	always (all msg: HTTPResponse | msg in State.http_network implies ((msg.contents in msg.dest.my_data) or (msg.contents = DataRequestCancelled)))
+
+}
+	
 
 // Task 2b: Write your vulnerability run command here, with comments explaining
 // the sequence of events and why the vulnerability arises.
 
 // FILL IN HERE
+check NoDataLeak for 4 but 2 User, 2 Connection
 
+pred vulnerability {
+	
+	Init 
+	
+
+}
+
+run vulnerability for 2
 
 // =============================================================================
 // Task 3: Diagnose the Root Cause
@@ -306,6 +321,12 @@ fact trans {
 // Task 3a: Write your inv predicate and check command here.
 
 // FILL IN HERE
+// i think this is when a connection is cleared, all the buffers in the thing should be cleared. 
+
+
+
+// check statement
+
 
 
 // Task 3b: Write a comment explaining (i) which action predicate causes
@@ -314,6 +335,9 @@ fact trans {
 
 // FILL IN HERE
 
+// cancelrequest
+// predicate fails to the clear the buffers. 
+// this results in httpresponse being made with someones elses send/recv data. 
 
 // =============================================================================
 // Task 4: Fix and Verify
