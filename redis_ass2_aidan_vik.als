@@ -322,22 +322,16 @@ run vulnerability for 2
 
 // FILL IN HERE
 // i think this is when a connection is cleared, all the buffers in the thing should be cleared. 
-pred inv {
+assert inv {
 
-always (all conn: Connection |
-		all user: State.connection_for[conn] | 
-			// the recv or send buffer data in users mydata. 
-			 (State.connection_send_data[conn] + State.connection_recv_data[conn]) in user.my_data
-		)
+	// always the case that, if there is no active connection, then the buffer should also be empty with that connection
+	always (all conn: Connection | no (State.connection_for[conn]) implies no (State.connection_send_data[conn] + State.connection_recv_data[conn]))
 }
 
-pred invUnalloc {
-	
-	always (all conn: Connection | no (State.connection_for[conn]) implies no (State.connection_send_data[conn] +  State.connection_recv_data[conn]))
-}
+
 
 // check statement
-
+check inv for 4 but 0 BugFixed, 2 User, 2 Connection
 
 
 // Task 3b: Write a comment explaining (i) which action predicate causes
@@ -346,9 +340,9 @@ pred invUnalloc {
 
 // FILL IN HERE
 
-// cancelrequest
-// predicate fails to the clear the buffers. 
-// this results in httpresponse being made with someones elses send/recv data. 
+// (i) Request cancelled action, it fails to the clear the buffers. 
+
+// (ii) this results in httpresponse being made with someones elses send/recv data. 
 
 // =============================================================================
 // Task 4: Fix and Verify
