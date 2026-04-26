@@ -232,26 +232,39 @@ pred action_release_connection_and_send_http_response {
 // Task 1h: Complete the action_user_request_cancelled predicate.
 pred action_user_request_cancelled {
 
-    some conn: Connection, u: User | {
-        (conn -> u) in State.connection_for
+	some conn: Connection, u: User | {
+		(conn -> u) in State.connection_for
+	
+	        State.connection_for' = State.connection_for - (conn -> u)
 
-        State.connection_for' = State.connection_for - (conn -> u)
+		some resp: HTTPResponse | {
+	            	resp.dest = u
+	            	resp.contents = DataRequestCancelled
+	
+	            //check that the network is empty
+	            	no State.http_network
+	
+	            //Place this HTTPResponse into the network
+			State.http_network' = resp
+	        }
 
-        some resp: HTTPResponse | {
-            resp.dest = u
-            resp.contents = DataRequestCancelled
 
-            //check that the network is empty
-            no State.http_network
+		( no BugFixed implies {
+		// vulnerable behvaiour
+		// unchanged. 
+	        State.connection_recv_data' = State.connection_recv_data
+	        State.connection_send_data' = State.connection_send_data
+	
+		}) and
+		( some BugFixed implies {
+		// correct behvaiour
+		        State.connection_recv_data' = State.connection_recv_data  - (conn -> UserData)
+		        State.connection_send_data' = State.connection_send_data  - (conn -> UserData)
+		})
 
-            //Place this HTTPResponse into the network
-            State.http_network' = resp
-        }
+	
 
-        // unchanged. 
-        State.connection_recv_data' = State.connection_recv_data
-        State.connection_send_data' = State.connection_send_data
-        State.last_action' = RequestCancelled
+		State.last_action' = RequestCancelled
 
         // this action does not check or remove the buffers,
         // basically only clears the connection table, but doesnt fliush the buffer
@@ -331,7 +344,7 @@ assert inv {
 
 
 // check statement
-check inv for 4 but 0 BugFixed, 2 User, 2 Connection
+check inv for 4 but 2 User, 2 Connection
 
 
 // Task 3b: Write a comment explaining (i) which action predicate causes
@@ -357,6 +370,21 @@ check inv for 4 but 0 BugFixed, 2 User, 2 Connection
 // NoDataLeak holds and inv is maintained.
 
 // FILL IN HERE
+
+// Task 4b: This forces the solver to ignore the "empty BugFixed" cases
+
+assert NoDataLeakandInvHolds {
+	//NoDataLeak and inv
+	some BugFixed implies (
+		// Inline logic for inv
+		(all conn: Connection | no State.connection_for[conn] implies no (State.connection_send_data[conn] + State.connection_recv_data[conn]))
+		and
+		// Inline logic for NoDataLeak
+		(all msg: State.http_network | msg in HTTPResponse implies (msg.contents in msg.dest.my_data or msg.contents in DataRequestCancelled))
+	)
+}
+
+check NoDataLeakandInvHolds for 5 but 1 BugFixed, 2 User, 2 Connection
 
 
 // Task 4c(i): Discuss your choice of bounds for the verification checks
