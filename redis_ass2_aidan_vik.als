@@ -109,7 +109,7 @@ pred action_user_send_http_request {
 		//User must own the data they are sending
 		d in u.my_data
 		//Need to create a new HTTPRequest and assign it to the next http_network
-		one req: HTTPRequest | {
+		some req: HTTPRequest | {
 			req.contents = d
 			req.src = u
 			State.http_network' = req
@@ -130,8 +130,6 @@ pred action_user_recv_http_response {
 	some msg: State.http_network, u: User | {
 		msg in HTTPResponse
 		msg.dest = u
-		//Send data to user, as not explicity stated
-		u.my_data' = u.my_data +msg.contents
 	}
 	//Once completed, the message is removed
 	no State.http_network'
@@ -157,8 +155,8 @@ pred action_recv_http_request_and_acquire_connection {
 		//Ensure network is cleared for next state
 		no State.http_network'
 		//Allocate the connection and write the data
-		State.connection_for' = State.connection_for + (c -> req.src)
-		State.connection_send_data' = State.connection_send_data + (c -> req.contents)
+		State.connection_for' = State.connection_for ++ (c -> req.src)
+		State.connection_send_data' = State.connection_send_data ++ (c -> req.contents)
 		//Update Last Action
 		State.last_action' = RecvReqAcquireConn
 		//Ensure other states remain unchanged
@@ -207,14 +205,16 @@ pred action_release_connection_and_send_http_response {
             // find the correct users
             (conn -> u) in State.connection_for
             // makes the response
-            some resp: HTTPResponse | {
-                resp.dest = u
-                resp.contents = State.connection_recv_data[conn]
-                //check that the network is empty
-                no State.http_network
-                //Place this HTTPResponse into the network
-                State.http_network' = resp
-            }
+		let d = State.connection_recv_data[conn] | {
+			some resp: HTTPResponse | {
+			resp.dest = u
+			resp.contents = d
+			//check that the network is empty
+			no State.http_network
+			//Place this HTTPResponse into the network
+			State.http_network' = resp
+			}
+		}
 	        //Clear the receive buffer
 	        State.connection_recv_data' = State.connection_recv_data - (conn -> State.connection_recv_data[conn])
 	        //Also clear the connection
@@ -248,9 +248,20 @@ pred action_user_request_cancelled {
             State.http_network' = resp
         }
 
-        // unchanged. 
-        State.connection_recv_data' = State.connection_recv_data
-        State.connection_send_data' = State.connection_send_data
+	(no BugFixed implies {
+		//Vulnerable Behai
+		// unchanged. 
+	        State.connection_recv_data' = State.connection_recv_data
+	        State.connection_send_data' = State.connection_send_data
+
+	} ) and 
+	( some BugFixed implies {
+		//Correct Behaviour
+	        State.connection_recv_data' = State.connection_recv_data - (conn -> UserData)
+	        State.connection_send_data' = State.connection_send_data - (conn -> UserData)
+	} )
+
+
         State.last_action' = RequestCancelled
 
         // this action does not check or remove the buffers,
@@ -291,13 +302,44 @@ fact trans {
 // Task 2a: Write your NoDataLeak assertion and check command here.
 
 // FILL IN HERE
+assert NoDataLeak {
+	always (all r: HTTPResponse | 
+		r in State.http_network implies 
+			(r.contents in r.dest.my_data or r.contents = DataRequestCancelled)
+	)
+}
 
 
 // Task 2b: Write your vulnerability run command here, with comments explaining
 // the sequence of events and why the vulnerability arises.
 
 // FILL IN HERE
-
+// Task 2b: Vulnerability run command
+run {
+	// 1. User A sends an HTTPRequest.
+	action_user_send_http_request ;
+	// 2. Frontend acquires Connection 1 for User A.
+	action_recv_http_request_and_acquire_connection ;
+	// 3. Redis backend processes Connection 1.
+	action_redis_process_connection ;
+	// 4. User A cancels their request (Buffers fail to clear).
+	action_user_request_cancelled ;
+	// 5. User A receives the cancellation confirmation.
+	action_user_recv_http_response ;
+	// 6. User B sends a new HTTPRequest.
+	action_user_send_http_request ;
+	// 7. Frontend acquires the newly freed Connection 1 for User B.
+	action_recv_http_request_and_acquire_connection ;
+	// 8. Frontend packages User A's data and sends it to User B.
+	action_release_connection_and_send_http_response ;
+    
+    // Property check evaluates safely at the end of the timeline
+	(some r: HTTPResponse | 
+		r in State.http_network and 
+		r.contents not in r.dest.my_data and 
+		r.contents != DataRequestCancelled
+	)
+} for 5 but 0 BugFixed, exactly 2 User, 10 steps
 
 // =============================================================================
 // Task 3: Diagnose the Root Cause
@@ -306,7 +348,23 @@ fact trans {
 // Task 3a: Write your inv predicate and check command here.
 
 // FILL IN HERE
+pred inv {
+	all conn: Connection |
+		let u = State.connection_for[conn] |
+			// If the connection is unallocated, both buffers must be completely empty
+			(no u implies (
+				no State.connection_send_data[conn] + 
+				State.connection_recv_data[conn]
+			))
+}
 
+//Claims that the safe state predicate holds in all reachable states.
+assert inv_always_holds {
+	always inv
+}
+
+// Instructs the solver to try and break the assertion.
+check inv_always_holds for 5
 
 // Task 3b: Write a comment explaining (i) which action predicate causes
 // the invariant to be violated and what it fails to do, and (ii) how
@@ -314,6 +372,19 @@ fact trans {
 
 // FILL IN HERE
 
+/*
+(i) The action_user_request_cancelled predicate is what violates the invariant. When a user cancels
+their request, this action correctly removes the mapping within the connection_for table. Although,
+it fails to also clear the connection_recv_data & connection_send_data channels, which directly
+violated the invariant rule such that unallocated connection must be empty.
+
+(i) When the compromised connection is eventually allocated to a new user through the
+action_recv_http_request_and_acquire_connection, the new user obtains the prior user's remaining
+data. Finally, when action_release_connection_and_send_http_response is called, it blindly
+acquires the leftover data sitting within the receive buffer & loads it into a HTTPResponse which
+destination is for the new user, hence completing the cross-user data leak.
+
+*/
 
 // =============================================================================
 // Task 4: Fix and Verify
@@ -328,6 +399,23 @@ fact trans {
 // NoDataLeak holds and inv is maintained.
 
 // FILL IN HERE
+
+// Task 4b: This forces the solver to ignore the "empty BugFixed" cases
+
+// Task 4b: Write check commands to verify that when some BugFixed,
+// NoDataLeak holds and inv is maintained.
+assert NoDataLeakandInvHolds {
+	//NoDataLeak and inv
+	some BugFixed implies (
+		// Inline logic for inv
+		(always all conn: Connection | no State.connection_for[conn] implies no (State.connection_send_data[conn] + State.connection_recv_data[conn]))
+		and
+		// Inline logic for NoDataLeak
+		(always all msg: State.http_network | msg in HTTPResponse implies (msg.contents in msg.dest.my_data or msg.contents in DataRequestCancelled))
+	)
+}
+
+check NoDataLeakandInvHolds for 5 but 1 BugFixed, 2 User, 2 Connection
 
 
 // Task 4c(i): Discuss your choice of bounds for the verification checks
