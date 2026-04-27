@@ -423,6 +423,20 @@ check NoDataLeakandInvHolds for 5 but 1 BugFixed, 2 User, 2 Connection
 // successful check provide? What are the limitations of bounded verification?
 
 // FILL IN HERE
+/*
+We use the "for 5" bound. This limits the solver to generating and exploring universes containing a maximum of 5
+object per signature, for example, up to 5 Users, 5 HTTPMessages, 5 Connections. 
+
+Within this specific scope the Alloy solver will explore all examples or interleavings of the defined actions above.
+
+A successful check will provide a high confidence due to its small scope, which assumes that most of the stuctural faults
+within the system can be discovered with a limited number of components that interact. If a bug exists within the system,
+it is highly likely it will be discovered within the scope of 5.
+
+Limitations include that bounding the scope during verification cannot provide an absolute guarantee of safety for a
+system that is unbounded. For example, if a specific fault or exploit only manifests when 6 users or 6 connections are 
+present, the Alloy solver will miss it and therefore falsely diagnose the system as safe and free of exploits.
+*/
 
 
 // Task 4c(ii): Identify at least one simplification or abstraction in this
@@ -430,3 +444,17 @@ check NoDataLeakandInvHolds for 5 but 1 BugFixed, 2 User, 2 Connection
 // explain concretely what kind of vulnerability or behaviour it could miss.
 
 // FILL IN HERE
+
+/*
+This current model greatly abstracts the concurrecy that occurs in standard networking. As the http_network contains a
+lone HTTPMessage, this means the model is limited to having a singular message at any given time travelling within the
+http_network. Furthermore, all actions in the model are atomic transitions.
+
+Within the real world, web applications operate in a highly asynchronous manner & servers are multi-threaded as multiple
+users are able to send requests simultaneously. As all the actions in this model are atomic, this completely eliminates
+the ability to test for concurrency bugs that are common within real-world web servers/networks such as race conditions
+or out of order packet deliveries. For example, if an attacker is to flood the network with a large number of DataRequestCancelled
+at the exact millisecond a new HTTPRequest is to arrive from another user, it may cause two differing server threads to 
+attempt to modify the connection_for table simultaneously, which would lead to state corruption that this model will 
+miss entirely.
+*/
