@@ -42,13 +42,13 @@ sig User {
 
 //Take two users from set of all users, ensuring they are disjoint, and check if 
 //their sets of personal data intersect
-fact user_data_disjoin{
+fact user_data_disjoint{
 	always all disj u1, u2 : User | no (u1.my_data & u2.my_data)
 }
 
 //Runs the predicate above with a scope of 3 using exactly 2 users
 //Returning predcate is consistent when ran
-//run user_data_disjoin for 3 but exactly 2 User
+//run user_data_disjoint for 3 but exactly 2 User
 
 // HTTP messages carry Data as their contents.
 // An HTTPRequest is sent by a user (src) to the server.
@@ -100,15 +100,18 @@ pred Init {
 }
 
 // Task 1c: Complete the action_user_send_http_request predicate.
-
 pred action_user_send_http_request {
   // FILL IN HERE
+
 	some u: User, d: UserData | {
+
 		//HTTP network is currently empty
 		no State.http_network
+
 		//User must own the data they are sending
 		d in u.my_data
-		//Need to create a new HTTPRequest and assign it to the next http_network
+
+		//Find HTTPRequest and assign it to the next http_network
 		some req: HTTPRequest | {
 			req.contents = d
 			req.src = u
@@ -117,6 +120,7 @@ pred action_user_send_http_request {
 	}
 	//Update Last action	
 	State.last_action' = UserSendReq
+
 	//Everything else remaind unchanged
 	State.connection_for' = State.connection_for
 	State.connection_send_data' = State.connection_send_data
@@ -126,15 +130,21 @@ pred action_user_send_http_request {
 // Task 1d: Complete the action_user_recv_http_response predicate.
 pred action_user_recv_http_response {
   // FILL IN HERE
+
 	//Ensure there is a HTTPResponse in the http_network that is being sent to some user
 	some msg: State.http_network, u: User | {
 		msg in HTTPResponse
 		msg.dest = u
+		
+		// assume message content exchange happens
 	}
+
 	//Once completed, the message is removed
 	no State.http_network'
+
 	//Last action updated
 	State.last_action' = UserRecvResp
+
 	//Ensure other states remain unchanged
 	State.connection_for' = State.connection_for
 	State.connection_send_data' = State.connection_send_data
@@ -144,21 +154,26 @@ pred action_user_recv_http_response {
 // Task 1e: Complete the action_recv_http_request_and_acquire_connection predicate.
 pred action_recv_http_request_and_acquire_connection {
   // FILL IN HERE
-	//Identify that there is a message in the network that is a request
 
-	//find a connection that isnt mapped to any user in State.connection_for
+	//IFind a HTTP message and connection
 	some req: State.http_network, c: Connection | {
-		//There is a request in HTTPRequest
+		
+		//The message is a HTTPRequest
 		req in HTTPRequest
 		
+		// connection has not been allocated
 		no State.connection_for[c]
-		//Ensure network is cleared for next state
+
+		//remove request from network
 		no State.http_network'
+
 		//Allocate the connection and write the data
-		State.connection_for' = State.connection_for ++ (c -> req.src)
-		State.connection_send_data' = State.connection_send_data ++ (c -> req.contents)
+		State.connection_for' = State.connection_for + (c -> req.src)
+		State.connection_send_data' = State.connection_send_data + (c -> req.contents)
+
 		//Update Last Action
 		State.last_action' = RecvReqAcquireConn
+
 		//Ensure other states remain unchanged
 		State.connection_recv_data' = State.connection_recv_data
 	}
@@ -168,26 +183,33 @@ pred action_recv_http_request_and_acquire_connection {
 // Task 1f: Complete user_data_for_same_user and action_redis_process_connection.
 pred user_data_for_same_user[d, d2 : UserData] {
   // FILL IN HERE
-	//Checks that there is some user that contains both d and d2 in its my_data
+
+	//Checks that there is some user that contains both d and d2 in their data
 	some u: User | (d + d2) in u.my_data
 }
 
 pred action_redis_process_connection {
   // FILL IN HERE
+
 	//For some connection
 	some c : Connection | {
+
 		//Check that the receive buffer for that same connection is currently empty
 		no State.connection_recv_data[c]
+
 		//Defining some data sitting in the connection's send buffer
 		some d1: State.connection_send_data[c], d2: UserData | {
+
 			//Check there is actually some data in that send buffer
-			//Removed for now, could be overcontraining
-			//some d1
-			//Use new helper predicate above
+			some d1
+
+			//Use new helper predicate above to check d1 d2 part of same user
 			user_data_for_same_user[d1, d2]
+
 			//Update the buffers
 			State.connection_send_data' = State.connection_send_data - (c -> d1)
 			State.connection_recv_data' = State.connection_recv_data + (c ->d2)
+
 			//Framing and updating last_action
 			State.last_action' = RedisProcess
 			State.connection_for' = State.connection_for
@@ -198,27 +220,36 @@ pred action_redis_process_connection {
 
 // Task 1g: Complete the action_release_connection_and_send_http_response predicate.
 pred action_release_connection_and_send_http_response {
+
+	//for some connection
 	some conn: Connection | {
-        // receive data has some
+
+        // receive data present
         one State.connection_recv_data[conn]
+
         some u: User | {
-            // find the correct users
+            // find the correct user
             (conn -> u) in State.connection_for
             // makes the response
 		let d = State.connection_recv_data[conn] | {
 			some resp: HTTPResponse | {
 			resp.dest = u
 			resp.contents = d
+
 			//check that the network is empty
 			no State.http_network
+
 			//Place this HTTPResponse into the network
 			State.http_network' = resp
 			}
 		}
+
 	        //Clear the receive buffer
 	        State.connection_recv_data' = State.connection_recv_data - (conn -> State.connection_recv_data[conn])
+
 	        //Also clear the connection
 	        State.connection_for' = State.connection_for - (conn -> u)
+
 	        //Update last_action
 	        State.last_action' = ReleaseConnSendResp
 	
@@ -232,43 +263,48 @@ pred action_release_connection_and_send_http_response {
 // Task 1h: Complete the action_user_request_cancelled predicate.
 pred action_user_request_cancelled {
 
-    some conn: Connection, u: User | {
-        (conn -> u) in State.connection_for
+// for some connection and user
+	some conn: Connection, u: User | {
+		// user has an existing connection
+		(conn -> u) in State.connection_for
 
-        State.connection_for' = State.connection_for - (conn -> u)
+		//release connection
+		State.connection_for' = State.connection_for - (conn -> u)
 
-        some resp: HTTPResponse | {
-            resp.dest = u
-            resp.contents = DataRequestCancelled
+		//create response
+		some resp: HTTPResponse | {
+			resp.dest = u
+			resp.contents = DataRequestCancelled
 
-            //check that the network is empty
-            no State.http_network
+		//check that the network is empty
+		no State.http_network
 
-            //Place this HTTPResponse into the network
-            State.http_network' = resp
-        }
+		//Place this HTTPResponse into the network
+		State.http_network' = resp
+		}
 
-	(no BugFixed implies {
-		//Vulnerable Behai
-		// unchanged. 
-	        State.connection_recv_data' = State.connection_recv_data
-	        State.connection_send_data' = State.connection_send_data
+		(no BugFixed implies {
+			//Vulnerable Behaviour
+			// unchanged. 
+			State.connection_recv_data' = State.connection_recv_data
+			State.connection_send_data' = State.connection_send_data
 
-	} ) and 
-	( some BugFixed implies {
-		//Correct Behaviour
-	        State.connection_recv_data' = State.connection_recv_data - (conn -> UserData)
-	        State.connection_send_data' = State.connection_send_data - (conn -> UserData)
-	} )
+		} ) and 
+		( some BugFixed implies {
+			//Correct Behaviour
+			State.connection_recv_data' = State.connection_recv_data - (conn -> UserData)
+			State.connection_send_data' = State.connection_send_data - (conn -> UserData)
+		} )
 
 
-        State.last_action' = RequestCancelled
+		State.last_action' = RequestCancelled
 
-        // this action does not check or remove the buffers,
-        // basically only clears the connection table, but doesnt fliush the buffer
-        // so when another user acquires that connection, then the same connection has some revc data, 
-        // which then goes to another user, soon after its validated. 
-    }
+// vulnerable predicate
+// this action does not check or remove the buffers,
+// basically only clears the connection table, but doesnt flush the buffer
+// so when another user acquires that connection, then the same connection has some revc data, 
+// which then goes to another user.
+}
 }
 
 // Given: do_nothing predicate (do not modify)
@@ -303,11 +339,16 @@ fact trans {
 
 // FILL IN HERE
 assert NoDataLeak {
+	// for all responses
 	always (all r: HTTPResponse | 
+		// if its in the network
 		r in State.http_network implies 
+			// contents designated user is correct or the content is the Request cancelled message
 			(r.contents in r.dest.my_data or r.contents = DataRequestCancelled)
 	)
 }
+
+check NoDataLeak for 4 but 2 User, 1 Connection
 
 
 // Task 2b: Write your vulnerability run command here, with comments explaining
@@ -315,21 +356,29 @@ assert NoDataLeak {
 
 // FILL IN HERE
 // Task 2b: Vulnerability run command
-run {
+run vulnerability {
+
 	// 1. User A sends an HTTPRequest.
 	action_user_send_http_request ;
+
 	// 2. Frontend acquires Connection 1 for User A.
 	action_recv_http_request_and_acquire_connection ;
+
 	// 3. Redis backend processes Connection 1.
 	action_redis_process_connection ;
+
 	// 4. User A cancels their request (Buffers fail to clear).
 	action_user_request_cancelled ;
+
 	// 5. User A receives the cancellation confirmation.
 	action_user_recv_http_response ;
+
 	// 6. User B sends a new HTTPRequest.
 	action_user_send_http_request ;
+
 	// 7. Frontend acquires the newly freed Connection 1 for User B.
 	action_recv_http_request_and_acquire_connection ;
+
 	// 8. Frontend packages User A's data and sends it to User B.
 	action_release_connection_and_send_http_response ;
     
@@ -339,7 +388,7 @@ run {
 		r.contents not in r.dest.my_data and 
 		r.contents != DataRequestCancelled
 	)
-} for 5 but 0 BugFixed, exactly 2 User, 10 steps
+} for 4 but 0 BugFixed, exactly 2 User, 10 steps
 
 // =============================================================================
 // Task 3: Diagnose the Root Cause
@@ -349,12 +398,13 @@ run {
 
 // FILL IN HERE
 pred inv {
+	// for all connections
 	all conn: Connection |
-		let u = State.connection_for[conn] |
-			// If the connection is unallocated, both buffers must be completely empty
-			(no u implies (
-				no State.connection_send_data[conn] + 
-				State.connection_recv_data[conn]
+			// if it is not acquired
+			(no State.connection_for[conn] implies (
+				// then it should not have anything in buffers for that connection
+				no (State.connection_send_data[conn] + 
+				State.connection_recv_data[conn])
 			))
 }
 
@@ -364,7 +414,7 @@ assert inv_always_holds {
 }
 
 // Instructs the solver to try and break the assertion.
-check inv_always_holds for 5
+check inv_always_holds for 4 but 2 User, 1 Connection
 
 // Task 3b: Write a comment explaining (i) which action predicate causes
 // the invariant to be violated and what it fails to do, and (ii) how
@@ -399,24 +449,18 @@ destination is for the new user, hence completing the cross-user data leak.
 // NoDataLeak holds and inv is maintained.
 
 // FILL IN HERE
-
-// Task 4b: This forces the solver to ignore the "empty BugFixed" cases
-
-// Task 4b: Write check commands to verify that when some BugFixed,
-// NoDataLeak holds and inv is maintained.
 assert NoDataLeakandInvHolds {
-	//NoDataLeak and inv
+	// if bugfixed is present, both the properties should hold 
 	some BugFixed implies (
-		// Inline logic for inv
-		(always all conn: Connection | no State.connection_for[conn] implies no (State.connection_send_data[conn] + State.connection_recv_data[conn]))
+		always inv
 		and
+
 		// Inline logic for NoDataLeak
 		(always all msg: State.http_network | msg in HTTPResponse implies (msg.contents in msg.dest.my_data or msg.contents in DataRequestCancelled))
 	)
 }
 
-check NoDataLeakandInvHolds for 5 but 1 BugFixed, 2 User, 2 Connection
-
+check NoDataLeakandInvHolds for 4 but 0 BugFixed, 2 User
 
 // Task 4c(i): Discuss your choice of bounds for the verification checks
 // in Task 4b. What behaviours are covered? What confidence does a
@@ -424,6 +468,11 @@ check NoDataLeakandInvHolds for 5 but 1 BugFixed, 2 User, 2 Connection
 
 // FILL IN HERE
 /*
+CHANGE THIS - idk what to inlcude to make the check statement above more contrained. But the reasoning would be that we have a
+highly scoped check, which represents the fundamental problem with 2 users and 1 connection. if this was solved, then big issues will be 
+solved as well. or phrase it like the bigger issue relating to this problem steps down to this core issue, whihc we check from this statemnt
+
+
 We use the "for 5" bound. This limits the solver to generating and exploring universes containing a maximum of 5
 object per signature, for example, up to 5 Users, 5 HTTPMessages, 5 Connections. 
 
