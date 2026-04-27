@@ -460,7 +460,7 @@ assert NoDataLeakandInvHolds {
 	)
 }
 
-check NoDataLeakandInvHolds for 4 but 0 BugFixed, 2 User
+check NoDataLeakandInvHolds for 4 but 1 BugFixed, 2 User
 
 // Task 4c(i): Discuss your choice of bounds for the verification checks
 // in Task 4b. What behaviours are covered? What confidence does a
@@ -468,23 +468,22 @@ check NoDataLeakandInvHolds for 4 but 0 BugFixed, 2 User
 
 // FILL IN HERE
 /*
-CHANGE THIS - idk what to inlcude to make the check statement above more contrained. But the reasoning would be that we have a
-highly scoped check, which represents the fundamental problem with 2 users and 1 connection. if this was solved, then big issues will be 
-solved as well. or phrase it like the bigger issue relating to this problem steps down to this core issue, whihc we check from this statemnt
+Choice of Bounds: We chose a highly constrained bound. Rather than letting the solver test massive universes, 
+we intentionally scoped the check to represent the fundamental architecture of the vulnerability: two competing 
+users interacting over a small timeframe. 
 
+Behaviours Covered: This scope exhaustively checks every possible interleaving of actions,
+such as sending, acquiring, cancelling, processing, that can occur between two users over 
+4 time steps. It perfectly covers the core interaction loop required to trigger a cross-user data leak.
 
-We use the "for 5" bound. This limits the solver to generating and exploring universes containing a maximum of 5
-object per signature, for example, up to 5 Users, 5 HTTPMessages, 5 Connections. 
+Confidence: A successful check here provides high confidence due to the "Small Scope Hypothesis." As we reasoned during modeling, 
+complex system failures usually step down to core interaction issues between a minimum number of entities. 
+By definitively proving that the core issue is mathematically solved for 2 users swapping a connection, it is highly probable 
+that the logic scales safely to larger deployments.
 
-Within this specific scope the Alloy solver will explore all examples or interleavings of the defined actions above.
-
-A successful check will provide a high confidence due to its small scope, which assumes that most of the stuctural faults
-within the system can be discovered with a limited number of components that interact. If a bug exists within the system,
-it is highly likely it will be discovered within the scope of 5.
-
-Limitations include that bounding the scope during verification cannot provide an absolute guarantee of safety for a
-system that is unbounded. For example, if a specific fault or exploit only manifests when 6 users or 6 connections are 
-present, the Alloy solver will miss it and therefore falsely diagnose the system as safe and free of exploits.
+Limitations: The fundamental limitation of bounded verification is that it is not an absolute mathematical proof for infinite systems. 
+If a convoluted vulnerability strictly requires 3 distinct users interacting simultaneously, or requires a sequence of 5 specific 
+steps to manifest, this scoped check will miss it and falsely report the system as completely safe.
 */
 
 
