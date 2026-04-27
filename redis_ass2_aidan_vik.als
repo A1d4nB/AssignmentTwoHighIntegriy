@@ -42,7 +42,7 @@ sig User {
 
 //Take two users from set of all users, ensuring they are disjoint, and check if 
 //their sets of personal data intersect
-fact user_data_disjoin{
+fact user_data_disjoint {
 	always all disj u1, u2 : User | no (u1.my_data & u2.my_data)
 }
 
@@ -107,11 +107,12 @@ pred action_user_send_http_request {
 		//HTTP network is currently empty
 		no State.http_network
 		//User must own the data they are sending
-		d in u.my_data
+	//potensh
+	d in u.my_data
 		//Need to create a new HTTPRequest and assign it to the next http_network
+// CHECK THIS >>
 		one req: HTTPRequest | {
-			req.contents = d
-			req.src = u
+			req.contents in req.src.my_data
 			State.http_network' = req
 		}
 	}
@@ -129,6 +130,9 @@ pred action_user_recv_http_response {
 	//Ensure there is a HTTPResponse in the http_network that is being sent to some user
 	some msg: State.http_network, u: User | {
 		msg in HTTPResponse
+
+
+// might change -  msg.dest in u
 		msg.dest = u
 		//Send data to user, as not explicity stated - might REMOVE
 		//u.my_data' = u.my_data +msg.contents
@@ -208,6 +212,7 @@ pred action_release_connection_and_send_http_response {
             (conn -> u) in State.connection_for
             // makes the response
             some resp: HTTPResponse | {
+		// MIght change to resp.dest in u
                 resp.dest = u
                 resp.contents = State.connection_recv_data[conn]
                 //check that the network is empty
@@ -316,7 +321,7 @@ assert NoDataLeak {
 // the sequence of events and why the vulnerability arises.
 
 // FILL IN HERE
-check NoDataLeak for 4 but 2 User, 2 Connection
+check NoDataLeak for 4 but 2 User
 
 pred vulnerability {
 	
@@ -373,6 +378,11 @@ check inv for 4 but 2 User, 2 Connection
 
 // Task 4b: This forces the solver to ignore the "empty BugFixed" cases
 
+
+check NoDataLeak for 5
+
+//check inv holds. 
+
 assert NoDataLeakandInvHolds {
 	//NoDataLeak and inv
 	some BugFixed implies (
@@ -384,7 +394,10 @@ assert NoDataLeakandInvHolds {
 	)
 }
 
-check NoDataLeakandInvHolds for 5 but 1 BugFixed, 2 User, 2 Connection
+
+
+check NoDataLeakandInvHolds for 5 but exactly 1 BugFixed, 2 User, 2 Connection
+
 
 
 // Task 4c(i): Discuss your choice of bounds for the verification checks
@@ -399,3 +412,5 @@ check NoDataLeakandInvHolds for 5 but 1 BugFixed, 2 User, 2 Connection
 // explain concretely what kind of vulnerability or behaviour it could miss.
 
 // FILL IN HERE
+//limitation could be race conditions? dead lock? is that still considered a vulnerabiltiy? technically denial of service. 
+//model access controls, whether the redis does the authentication checks properly?
